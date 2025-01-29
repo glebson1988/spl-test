@@ -11,13 +11,21 @@ import {
   MINT_SIZE,
   TOKEN_PROGRAM_ID,
   createInitializeMintInstruction,
+  getAssociatedTokenAddressSync,
+  createAssociatedTokenAccountIdempotentInstruction,
+  createMintToInstruction,
 } from "@solana/spl-token";
 import * as dotenv from "dotenv";
 
 // Load environment variables
 dotenv.config();
 
-// Function to fetch and validate environment variables
+/**
+ * Fetch and validate an environment variable.
+ * @param key - The key of the environment variable.
+ * @param defaultValue - The default value if the variable is not set.
+ * @returns The environment variable value.
+ */
 const getEnvVariable = (key: string, defaultValue: string = ""): string => {
   const value = process.env[key];
   if (!value) {
@@ -44,7 +52,13 @@ try {
 // Create a connection to the Solana network
 const connection: Connection = new Connection(quickNodeEndpoint);
 
-// Function to create a new token
+/**
+ * Creates a new token on the Solana blockchain.
+ * @param authority - The keypair that has minting authority.
+ * @param connection - The Solana blockchain connection.
+ * @param numDecimals - Number of decimals for the token.
+ * @returns A promise resolving to the mint's public key and transaction signature.
+ */
 async function createNewToken(
   authority: Keypair,
   connection: Connection,
@@ -54,7 +68,7 @@ async function createNewToken(
     const requiredBalance = await getMinimumBalanceForRentExemptMint(connection);
     const mintKeypair = Keypair.generate();
 
-    // Instructions to create a token
+    // Instructions for creating the token
     const createAccountIx = SystemProgram.createAccount({
       fromPubkey: authority.publicKey,
       newAccountPubkey: mintKeypair.publicKey,
@@ -77,6 +91,8 @@ async function createNewToken(
       authority,
       mintKeypair,
     ]);
+
+    console.log(`New Token Created: https://explorer.solana.com/tx/${initSignature}?cluster=devnet`);
     return { initSignature, mint: mintKeypair.publicKey };
   } catch (error) {
     console.error("Failed to create new token:", error);
@@ -84,17 +100,64 @@ async function createNewToken(
   }
 }
 
-// Placeholder for minting tokens
+/**
+ * Mints tokens to an associated token account.
+ * @param mint - The public key of the mint (token).
+ * @param authority - The keypair that has minting authority.
+ * @param connection - The Solana blockchain connection.
+ * @param numTokens - The number of tokens to mint.
+ * @returns A promise resolving to the mint transaction signature.
+ */
 async function mintTokens(
   mint: PublicKey,
   authority: Keypair,
   connection: Connection,
   numTokens: number
-): Promise<void> {
-  // TODO: Implement token minting logic
+): Promise<{ mintSignature: string }> {
+  try {
+    // Generate the associated token account address
+    const tokenATA = getAssociatedTokenAddressSync(mint, authority.publicKey);
+
+    // Instruction to create an associated token account (if it doesn't exist)
+    const createTokenAccountIx = createAssociatedTokenAccountIdempotentInstruction(
+      authority.publicKey,
+      tokenATA,
+      authority.publicKey,
+      mint
+    );
+
+    // Instruction to mint tokens to the associated token account
+    const mintTokensIx = createMintToInstruction(
+      mint,
+      tokenATA,
+      authority.publicKey,
+      numTokens
+    );
+
+    const transaction = new Transaction().add(createTokenAccountIx, mintTokensIx);
+    const mintSignature = await sendAndConfirmTransaction(
+      connection,
+      transaction,
+      [authority],
+      { skipPreflight: true }
+    );
+
+    console.log(`Mint Transaction: https://explorer.solana.com/tx/${mintSignature}?cluster=devnet`);
+    return { mintSignature };
+  } catch (error) {
+    console.error("Failed to mint tokens:", error);
+    throw error;
+  }
 }
 
-// Placeholder for transferring tokens
+/**
+ * Placeholder for transferring tokens.
+ * @param mint - The token mint public key.
+ * @param authority - The keypair with transfer authority.
+ * @param destination - The recipient's associated token account.
+ * @param connection - The Solana blockchain connection.
+ * @param numTokens - The amount of tokens to transfer.
+ */
 async function transferTokens(
   mint: PublicKey,
   authority: Keypair,
@@ -105,23 +168,36 @@ async function transferTokens(
   // TODO: Implement token transfer logic
 }
 
-// Placeholder for burning tokens
+/**
+ * Placeholder for burning tokens.
+ * @param mint - The token mint public key.
+ * @param authority - The keypair with burning authority.
+ * @param connection - The Solana blockchain connection.
+ * @param numTokens - The amount of tokens to burn.
+ * @param decimals - Number of decimals for the token.
+ */
 async function burnTokens(
   mint: PublicKey,
   authority: Keypair,
   connection: Connection,
-  numberTokens: number,
+  numTokens: number,
   decimals: number
 ): Promise<void> {
   // TODO: Implement token burning logic
 }
 
-// Main function
+// Main execution function
 async function main(): Promise<void> {
   try {
+    // Step 1: Create a new token
     const { initSignature, mint } = await createNewToken(tokenAuthority, connection, 0);
-    console.log(`Init Token Tx: https://explorer.solana.com/tx/${initSignature}?cluster=devnet`);
+    console.log(`Token Created: https://explorer.solana.com/tx/${initSignature}?cluster=devnet`);
     console.log(`Mint ID: ${mint.toBase58()}`);
+
+    // Step 2: Mint initial tokens
+    const { mintSignature } = await mintTokens(mint, tokenAuthority, connection, 100);
+    console.log(`Mint Tokens Tx: https://explorer.solana.com/tx/${mintSignature}?cluster=devnet`);
+
   } catch (error) {
     console.error("Error in main execution:", error);
   } finally {
