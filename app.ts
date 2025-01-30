@@ -14,6 +14,8 @@ import {
   getAssociatedTokenAddressSync,
   createAssociatedTokenAccountIdempotentInstruction,
   createMintToInstruction,
+  getOrCreateAssociatedTokenAccount,
+  transfer,
 } from "@solana/spl-token";
 import * as dotenv from "dotenv";
 
@@ -151,12 +153,14 @@ async function mintTokens(
 }
 
 /**
- * Placeholder for transferring tokens.
+ * Transfers tokens from one account to another.
+ *
  * @param mint - The token mint public key.
  * @param authority - The keypair with transfer authority.
- * @param destination - The recipient's associated token account.
+ * @param destination - The recipient's wallet public key.
  * @param connection - The Solana blockchain connection.
  * @param numTokens - The amount of tokens to transfer.
+ * @returns A promise resolving to the transaction signature.
  */
 async function transferTokens(
   mint: PublicKey,
@@ -164,8 +168,46 @@ async function transferTokens(
   destination: PublicKey,
   connection: Connection,
   numTokens: number
-): Promise<void> {
-  // TODO: Implement token transfer logic
+): Promise<{ transferSignature: string }> {
+  try {
+    // Ensure the recipient has an associated token account
+    const destinationATA = await getOrCreateAssociatedTokenAccount(
+      connection,
+      authority,
+      mint,
+      destination,
+      undefined,
+      undefined,
+      { skipPreflight: true }
+    );
+
+    // Ensure the sender's associated token account exists
+    const sourceATA = await getOrCreateAssociatedTokenAccount(
+      connection,
+      authority,
+      mint,
+      authority.publicKey,
+      undefined,
+      undefined,
+      { skipPreflight: true }
+    );
+
+    // Execute token transfer
+    const transferSignature = await transfer(
+      connection,
+      authority,
+      sourceATA.address,
+      destinationATA.address,
+      authority,
+      numTokens
+    );
+
+    console.log(`Transfer Transaction: https://explorer.solana.com/tx/${transferSignature}?cluster=devnet`);
+    return { transferSignature };
+  } catch (error) {
+    console.error("Failed to transfer tokens:", error);
+    throw error;
+  }
 }
 
 /**
@@ -189,14 +231,29 @@ async function burnTokens(
 // Main execution function
 async function main(): Promise<void> {
   try {
-    // Step 1: Create a new token
-    const { initSignature, mint } = await createNewToken(tokenAuthority, connection, 0);
-    console.log(`Token Created: https://explorer.solana.com/tx/${initSignature}?cluster=devnet`);
-    console.log(`Mint ID: ${mint.toBase58()}`);
+    let mint: PublicKey;
 
-    // Step 2: Mint initial tokens
+    // Use an existing token if provided in the .env file
+    const existingMint = getEnvVariable("MINT_ADDRESS");
+    if (existingMint) {
+      mint = new PublicKey(existingMint);
+      console.log(`Using existing token: ${mint.toBase58()}`);
+    } else {
+      // Create a new token only if no existing one is provided
+      const { initSignature, mint: newMint } = await createNewToken(tokenAuthority, connection, 0);
+      console.log(`Token Created: https://explorer.solana.com/tx/${initSignature}?cluster=devnet`);
+      console.log(`Mint ID: ${newMint.toBase58()}`);
+      mint = newMint;
+    }
+
+    // Step 2: Mint tokens
     const { mintSignature } = await mintTokens(mint, tokenAuthority, connection, 100);
     console.log(`Mint Tokens Tx: https://explorer.solana.com/tx/${mintSignature}?cluster=devnet`);
+
+    // Step 3: Transfer tokens to another account
+    const receiver = Keypair.generate();
+    const { transferSignature } = await transferTokens(mint, tokenAuthority, receiver.publicKey, connection, 1);
+    console.log(`Transfer Tokens Tx: https://explorer.solana.com/tx/${transferSignature}?cluster=devnet`);
 
   } catch (error) {
     console.error("Error in main execution:", error);
