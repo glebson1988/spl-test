@@ -18,8 +18,8 @@ Make sure you have **Node.js** and **TypeScript** installed.
 
 1. Clone the repository:
    ```sh
-   git clone https://github.com/glebson1988/solana-token-creator.git
-   cd solana-token-creator
+   git clone https://github.com/glebson1988/spl-test.git
+   cd spl-test
    ```
 
 2. Install dependencies:
