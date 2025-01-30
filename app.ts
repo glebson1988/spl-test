@@ -16,6 +16,7 @@ import {
   createMintToInstruction,
   getOrCreateAssociatedTokenAccount,
   transfer,
+  burnChecked,
 } from "@solana/spl-token";
 import * as dotenv from "dotenv";
 
@@ -94,7 +95,6 @@ async function createNewToken(
       mintKeypair,
     ]);
 
-    console.log(`New Token Created: https://explorer.solana.com/tx/${initSignature}?cluster=devnet`);
     return { initSignature, mint: mintKeypair.publicKey };
   } catch (error) {
     console.error("Failed to create new token:", error);
@@ -144,7 +144,6 @@ async function mintTokens(
       { skipPreflight: true }
     );
 
-    console.log(`Mint Transaction: https://explorer.solana.com/tx/${mintSignature}?cluster=devnet`);
     return { mintSignature };
   } catch (error) {
     console.error("Failed to mint tokens:", error);
@@ -202,7 +201,6 @@ async function transferTokens(
       numTokens
     );
 
-    console.log(`Transfer Transaction: https://explorer.solana.com/tx/${transferSignature}?cluster=devnet`);
     return { transferSignature };
   } catch (error) {
     console.error("Failed to transfer tokens:", error);
@@ -211,12 +209,14 @@ async function transferTokens(
 }
 
 /**
- * Placeholder for burning tokens.
+ * Burns a specified amount of tokens from the token authority's associated account.
+ *
  * @param mint - The token mint public key.
  * @param authority - The keypair with burning authority.
  * @param connection - The Solana blockchain connection.
  * @param numTokens - The amount of tokens to burn.
  * @param decimals - Number of decimals for the token.
+ * @returns A promise resolving to the burn transaction signature.
  */
 async function burnTokens(
   mint: PublicKey,
@@ -224,8 +224,37 @@ async function burnTokens(
   connection: Connection,
   numTokens: number,
   decimals: number
-): Promise<void> {
-  // TODO: Implement token burning logic
+): Promise<{ burnSignature: string }> {
+  try {
+    // Ensure the token authority has an associated token account
+    const tokenATA = await getOrCreateAssociatedTokenAccount(
+      connection,
+      authority,
+      mint,
+      authority.publicKey,
+      undefined,
+      undefined,
+      { skipPreflight: true }
+    );
+
+    // Execute token burn
+    const burnSignature = await burnChecked(
+      connection,
+      authority,
+      tokenATA.address,
+      mint,
+      authority.publicKey,
+      numTokens,
+      decimals,
+      undefined,
+      { skipPreflight: true }
+    );
+
+    return { burnSignature };
+  } catch (error) {
+    console.error("Failed to burn tokens:", error);
+    throw error;
+  }
 }
 
 // Main execution function
@@ -254,6 +283,10 @@ async function main(): Promise<void> {
     const receiver = Keypair.generate();
     const { transferSignature } = await transferTokens(mint, tokenAuthority, receiver.publicKey, connection, 1);
     console.log(`Transfer Tokens Tx: https://explorer.solana.com/tx/${transferSignature}?cluster=devnet`);
+
+    // Step 4: Burn tokens
+    const { burnSignature } = await burnTokens(mint, tokenAuthority, connection, 10, 0);
+    console.log(`Burn Tokens Tx: https://explorer.solana.com/tx/${burnSignature}?cluster=devnet`);
 
   } catch (error) {
     console.error("Error in main execution:", error);
